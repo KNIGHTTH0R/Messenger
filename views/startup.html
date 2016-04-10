@@ -1,0 +1,233 @@
+<head>
+	<link href='https://fonts.googleapis.com/css?family=Roboto+Mono:400,100,500,700' rel='stylesheet' type='text/css'>
+	<link href="https://cdnjs.cloudflare.com/ajax/libs/skeleton/2.0.4/skeleton.min.css" rel="stylesheet">
+	<style>
+		p,h1,h2,h3,h4{
+			margin:0;
+		}
+		html,body{
+			background:#272c34;
+			font-family: "Roboto Mono";
+			padding:0;
+			margin:0;
+			height:100vh;
+		}
+		.sidebar{
+			background:#202429;
+			width:20vw;
+			height:100vh;
+			overflow-y:scroll;
+			overflow-x:hidden;
+			display:inline-block;
+			background-attachment:fixed;
+			float:left;
+		}
+		.sidebarHeader{
+			height: 15vh;
+			background: #181c22;
+			position: fixed;
+			width: 20vw;
+		}
+		.sbContainer{
+			display:flex;
+			align-items: center;
+			text-align: center;
+			justify-content: center;
+		}
+		.sidebarBody{
+			padding-top:15vh;
+		}
+		.chatText{
+			color:#b1b6af;
+			padding-left:5px;
+			word-wrap: break-word;
+		}
+		.chatBox{
+			display:flex;
+			align-items:center;
+			margin-top:1px;
+			margin-bottom:1px;
+			transition: all .25s;
+			padding:10px;
+			flex-wrap: wrap;
+		}
+		.logo{
+			background-color:#3498db;
+			-webkit-mask: url(https://feline.io/assets/logoblack.svg) no-repeat 50% 50%;
+			-webkit-mask-size: cover;
+			height: 10vh;
+			width: 10vh;
+			color:white;
+		}
+		.chatImg{
+			display:flex;
+			align-items:center;
+			justify-content:center;
+			border-radius:999px;
+			font-size:18px;
+			background-size: cover;
+			background-position: center;
+		}
+		.chatBox:hover{
+			background:rgba(255,255,255,0.1);
+			cursor:pointer;
+			transition: all .25s;
+		}
+		.service{
+			color:white !important;
+
+		}
+		.chatBody{
+			display:inline-block;
+			width:80vw;
+			height:100vh;
+			overflow-y:scroll;
+		}
+		.messageImg{
+			background:#efefef;
+			color:#333;
+			width:4vw;
+			height:4vw;
+			border-radius:999px;
+			display:inline-flex;
+			align-items: center;
+			justify-content: center;
+			font-size:18px;
+			vertical-align: top;
+		}
+		.messageName{
+			opacity:0.7;
+			font-size:12px;
+		}
+		.messageBox{
+			padding-left:10px;
+			padding-top:5px;
+			padding-bottom:5px;
+		}
+		.messageContent{
+			display:inline-block;
+			align-items: center;
+			color:#efefef;
+			width:74vw;
+			font-size:14px;
+			vertical-align: middle;
+		}
+		.sidebarh2{
+			color:white;
+			font-size:16px;
+		}
+	</style>
+	<script>
+		global.appRoot = __dirname+'/../';
+		var Promise = require('bluebird');
+		var Sequelize = require('sequelize');
+		var sequelize = new Sequelize({dialect: 'sqlite', storage: global.appRoot+'/db.sqlite', logging: false});
+		var database = require(global.appRoot+'/database.js')(sequelize);
+		var selectedChat;
+
+		function loadMessage(chatId, content){
+			if(chatId !== selectedChat){
+				return;
+			}
+			sequelize.models.Contact.findOne({where: {instance: content.contact}})
+			.then(function(r){
+				if(!r){
+					r = {name: "?"}
+				}
+				var name = r.name || content.contact;
+				console.log(content);
+				document.getElementById('chatContent').innerHTML += '\
+					<div class="messageBox row">\
+						<div class="messageImg" style="background:url('+r.image+'); background-size:cover;">\
+							\
+						</div>\
+						<div class="messageContent">\
+							<p class="messageName">\
+								<b>'+name+'</b>\
+							</p>\
+							<p class="messageText">\
+								'+content.content+'\
+							</p>\
+						</div>\
+					</div>\
+				';
+				var elem = document.getElementById('chatBody')
+				elem.scrollTop = elem.scrollHeight;
+			})
+		}
+
+		/*function grabContact(model){
+			return new Promise(function(res,rej){
+				sequelize.models.Contact.findById(model.contactId)
+				.then(function(r){
+					res(r.dataValues);
+				})
+			})
+		}*/
+
+		function loadChat(id){
+			selectedChat = id;
+			document.getElementById('chatContent').innerHTML = "";
+			sequelize.models.Message.findAll({where: {ChatId: id}, order: 'lastUpdated DESC', limit: 20})
+			.then(function(r){
+				r.reverse()
+				Promise.map(r, function(item){
+					loadMessage(id, item)
+				})
+			})
+		}
+
+		
+		sequelize.models.Chat.findAll({order: 'lastUpdated DESC'})
+		.then(function(r){
+			for(i=0;i<r.length;i++){
+				var new_light_color = 'rgb('+(Math.floor((256-229)*Math.random())+230)+','+(Math.floor((256-229)*Math.random())+230)+','+(Math.floor((256-229)*Math.random())+230)+')';
+				var serviceColor;
+				var letter;
+
+				switch(r[i].type){
+					case 'skype':
+						serviceColor = '#16c1f0';
+						letter = 'S';
+					break;
+					case 'slack':
+						serviceColor = 'url(http://socialmediaweek.org/wp-content/blogs.dir/1/files/slack-pattern.jpg)';
+						letter = '#';
+					break;
+					default:
+					break;
+				}
+				if(!r[i].name){
+					continue;
+				}
+				document.getElementById('populateSidebar').innerHTML += '\
+				<div class="chatBox row" onclick="loadChat('+r[i].id+')"> \
+					<div class="chatImg service two columns" style="background: '+serviceColor+'">\
+						'+letter+'\
+					</div> \
+					<p class="chatText ten columns">'+r[i].name.toUpperCase()+'</p>\
+				</div>';
+			}
+		})
+		window.onload = function(){
+			loadChat(1);
+		}
+	</script>
+</head>
+<body>
+	<div class="sidebar">
+		<div class="sidebarHeader">
+			<div class="sbContainer">
+				<div class="logo">
+				</div>
+				<!--<h2 class="sidebarh2">MESSENGER</h2>-->
+			</div>
+		</div>
+		<div class="sidebarBody" id="populateSidebar">
+		</div>
+	</div>
+	<div class="chatBody" id="chatBody">
+		<div id="chatContent">
+		</div>
+	</div>
+</body>
