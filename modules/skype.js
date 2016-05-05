@@ -4,6 +4,9 @@ var bigInt = require("big-integer");
 var fs = Promise.promisifyAll(require('fs'));
 var request = require('request');
 var cheerio = require('cheerio');
+var mkdirp = Promise.promisifyAll(require('mkdirp'));
+var request = require('request');
+
 var database;
 
 var token;
@@ -12,22 +15,6 @@ var username;
 var password;
 var skypeToken;
 
-
-function getContactForUsername(username){
-	return new Promise(function(res,rej){
-		var options = {
-			url: 'https://api.skype.com/users/self/contacts/profiles',
-			headers: {
-				'X-Skypetoken': skypeToken,
-			},
-			form: {contacts: [username]}
-		}
-		request.post(options, function(error, response, body){
-			var json = JSON.parse(body)[0];
-			res(json);
-		});
-	})
-}
 
 function isJSON(str) {
     try {
@@ -176,6 +163,7 @@ function makeHash(challenge, appId, key) {
 };
 
 var tokenTryIndex = 0;
+
 function getToken(manualST, time, cb){
 	var subOptions = {
 		url: 'https://client-s.gateway.messenger.live.com/v1/users/ME/endpoints',
@@ -268,7 +256,7 @@ function createEndpoint(){
             "id": "messagingService",
             "type": "EndpointPresenceDoc",
             "selfLink": "uri",
-            "privateInfo": { "epname": "skype" },
+            "privateInfo": { "epname": "GehlyMessenger" },
             "publicInfo": {
                 "capabilities": "video|audio",
                 "type": 1,
@@ -290,25 +278,18 @@ function createEndpoint(){
 }
 
 function processBody(body){
-	//drop, aka the "todo" list
 	var drop = ['EndpointPresence', 'UserPresence', 'ConversationUpdate', 'Control/Typing'];
 	if(drop.indexOf(body.resourceType) !== -1 || !body.resource.content){
-		//No spam pls
 		return;
 	}
+	console.log("[Skype]", "Polled: ", body)
 	var name;
-	if(!body.resource.threadtopic){
-		name = "{PM} ("+body.resource.conversationLink.split(':')[2]+")";
-		database.addMessage(body.resource.content, body.resource.id, body.resource.conversationLink.split('/')[7], body.resource.from.split(':')[2], body.originalarrivaltime, 'skype')
-	}else{
-		name = "{GROUP} ("+body.resource.threadtopic.substring(0,20)+")";
-		database.addMessage(body.resource.content, body.resource.id, body.resource.conversationLink.split('/')[7], body.resource.from.split(':')[2], body.originalarrivaltime, 'skype')
-	}
-
-	console.log("[Skype]", name, body.resource.imdisplayname+":", body.resource.content)
+	var chatId = body.resource.from.split(':')[2];
+	var fromUser = body.resource.from.split(':')[2];
+	database.addMessage(body.resource.content, body.resource.id, chatId, fromUser, body.originalarrivaltime, 'skype')
 }
+
 function poll(){
-	//console.log("[Skype] Poll waiting for data....");
 	var options= {
 		url: endpoint+'/subscriptions/0/poll',
 		body: '{}',
@@ -317,21 +298,17 @@ function poll(){
 		}
 	}
 	request.post(options, function(error,response,body){
-		//console.log("[Skype] Poll completed.");
 		var parse;
 		if(isJSON(body)){
 			parse = JSON.parse(body)
 		}else{
-			//Error out non-json responses.
 			return console.log("[Skype]", body);
 		}
 		if(body.errorCode){
-			//Handle errors
 			console.log("[Skype]", body.error);
 			return;
 		}
 		if(!parse.eventMessages || parse.eventMessages.length == 0){
-			//No messages, this will break the processBody loop.
 			return;
 		}
 		for(i=0;i<parse.eventMessages.length;i++){
@@ -368,206 +345,186 @@ function keepAlive(){
 	})
 }
 
+
+function createNameForConversation(conversation){
+	return new Promise(function(res,rej){
+		if(conversation.threadProperties){
+			if(conversation.threadProperties.topic){
+				name = conversation.threadProperties.topic
+			}else{
+				return res();
+			}
+			res(name);
+		}else{
+			var uid = conversation.id.split(':')[1];
+			database.models.contact.findOne({where: {instance: uid}})
+			.then(function(r){
+				if(!r){
+					r = {};
+					r.name = uid;
+				}
+				res(r.name)
+				
+			})
+		}
+	})
+}
+
+function processConversation(conversation){
+	return new Promise(function(res,rej){		
+		createNameForConversation(conversation)
+		.then(function(r){
+			res({id: conversation.id, topic: r, link: conversation.messages, originalarrivaltime: conversation.lastMessage.originalarrivaltime});
+		})
+	})
+}
+
+function processMessage(message){
+	return new Promise(function(res,rej){
+		var authorId = message.from.split(":")[2];
+		var object = {content: message.content, id: message.id, author: null, originalarrivaltime: message.originalarrivaltime};
+		database.models.contact.findOne({where: {instance: message.from.split(":")[2]}})
+		.then(function(r){
+			if(r){
+				object.author = r.dataValues;
+			}else{
+				object.author = {name: authorId, instance: '404', type: 'skype'}
+			}
+			res(object);
+		})
+	})
+}
+function downloadProfilePicture(url, fileName){
+	var directory = global.appRoot+'/assets/skype/'+username+'/';
+	mkdirp(directory, function(err){
+		if(url){
+			request.get(url).pipe(fs.createWriteStream(directory+fileName+'.jpg'))
+		}		
+	});
+}
 function addOwnProfile(){
 	return new Promise(function(res,rej){
 		var options = {
-			url: 'https://api.skype.com/users/'+username+'/profile',
+			url: 'https://api.skype.com/users/self/profile',
 			headers: {
 				'X-Skypetoken': skypeToken,
 			},
 		}
 		request.get(options, function(error, response, body){
 			var json = JSON.parse(body);
-			database.addContact(json.firstname, username, json['avatarUrl'], 'skype')
+			downloadProfilePicture(json.avatarUrl, json.username);
+			var name = json.firstname;
+			if(json.lastname){
+				name += " "+json.lastname
+			}
+			database.addContact(name, json.username, 'skype')
 			.then(function(r){
-				res()
-			})
-			.catch(function(e){
-				console.error(e);
+				res();
 			})
 		});
 	})
-	
 }
-
-function getContacts(){
-	return new Promise(function(res,rej){
-		var options = {
-			url: 'https://contacts.skype.com/contacts/v1/users/'+username+'/contacts',
-			headers: {
-				'X-Skypetoken': skypeToken,
-			},
-		}
-		request.get(options, function(error, response, body){
-			var json = JSON.parse(body).contacts;
-			Promise.map(json, function(item){
-				return database.addContact(item['display_name'], item.id, item['avatar_url'], 'skype')
-			})
+module.exports = {
+	username: null,
+	type: 'skype',
+	initialize: function(db, data){
+		this.username = data.username;
+		database = require(global.appRoot+"database.js")(db);
+		return new Promise(function(res,rej){
+			login2Skype(data.username, data.password)
 			.then(function(r){
-				return addOwnProfile()
-			})
-			.then(function(){
-				console.log("[Skype] Contacts completed.")
+				createEndpoint();
+				subscribe()
+				keepAlive()
+				setInterval(function(){
+					keepAlive()
+				}, 45000);
+				poll();
+				setInterval(function(){
+					poll()
+				}, 500);
 				res();
 			})
-			.catch(function(e){
-				console.error(e);
-			})
 		})
-	})
-}
-
-var conversationLimit = 5;
-var conversationIndex = 0;
-var conversations = [];
-
-function processConversation(conversation){
-	return new Promise(function(res,rej){
-		var object;
-		if(conversation.threadProperties){
-			var name = conversation.threadProperties.topic;
-			if(!name){
-				return res();
-			}
-			object = {id: conversation.id, topic: name, link: conversation.messages, originalarrivaltime: conversation.lastMessage.originalarrivaltime};
-			res(object);
-		}else{
-			getContactForUsername(conversation.targetLink.split(':')[2])
-			.then(function(r){
-				var name = r.firstname;
-				if(r.lastname){
-					name += " "+r.lastname;
+		.catch(function(e){
+			throw e;
+		});
+	},
+	getConversations: function(){
+		return new Promise(function(res,rej){
+			var options = {
+			  url: 'https://bn2-client-s.gateway.messenger.live.com/v1/users/ME/conversations/?view=msnp24Equivalent&targetType=Passport%7CSkype%7CLync%7CThread&startTime=0',
+			  headers: {
+			    'RegistrationToken': token,
+			  },
+			};
+			request.get(options, function(error,response,body){
+				if(!isJSON(body)){
+					return res();
 				}
-				object = {id: conversation.id, topic: name, link: conversation.messages, originalarrivaltime: conversation.lastMessage.originalarrivaltime};
-				return res(object);
-			})
-			.catch(function(e){
-				console.error(e);
-			})
-		}
-	})
-}
-function getConversations(link, cb){
-	if(conversationIndex>conversationLimit){
-		console.log("[Skype] Conversations completed 1.")
-		return cb();
-	}
-	var options = {
-	  url: link,
-	  headers: {
-	    'RegistrationToken': token,
-	  },
-	};
-	conversationIndex++
-	request.get(options, function(error,response,body){
-		var parse;
-		if(!isJSON(body)){
-			return cb();
-		}
-		parse = JSON.parse(body);
-		Promise.map(parse.conversations, function(convo){
-			return processConversation(convo)
+				var parse = JSON.parse(body);
+				Promise.map(parse.conversations, function(convo){
+					return processConversation(convo)
+				})
+				.then(function(r){
+					for(i=0;i<r.length;i++){
+						r[i].module = 'skype';
+					}
+					res(r);
+				})
+			});
 		})
-		.then(function(r){
-			for(i=0;i<r.length;i++){
-				if(r[i]){
-					conversations.push({name: r[i].topic, instance: r[i].id, link: r[i].link, originalarrivaltime: r[i].originalarrivaltime});
-					database.addChat(r[i].topic, r[i].id, Date.parse(r[i].originalarrivaltime) || 0, 'skype')
+	},
+	getMessages: function(id){
+		return new Promise(function(res,rej){
+			var options = {
+			  url: 'https://client-s.gateway.messenger.live.com/v1/users/ME/conversations/'+id+'/messages?startTime=0&view=msnp24Equivalent',
+			  headers: {
+			    'RegistrationToken': token,
+			  },
+			};
+
+			request.get(options, function(error,response,body){
+				var parse;
+				if(!isJSON(body)){
+					return cb();
 				}
-			}
-			if(parse['_metadata'] && parse['_metadata'].backwardLink){
-				return getConversations(parse['_metadata'].backwardLink, cb)
-			}else{
-				console.log("[Skype] Conversations completed 2.")
-				return cb();
-			}
+				parse = JSON.parse(body);
+				Promise.map(parse.messages, function(msg){
+					return processMessage(msg)
+				})
+				.then(function(r){
+					res(r);
+				})
+			});
 		})
-	});
-}
-
-var messageLimit = 5;
-var messageIndex = 0;
-var messages = [];
-
-function processMessage(message){
-	return new Promise(function(res,rej){
-		var object = {content: message.content, id: message.id, author: message.from.split(":")[2], originalarrivaltime: message.originalarrivaltime};
-		res(object);
-	})
-}
-
-function getMessages(id, link, cb){
-	if(messageIndex>messageLimit){
-		return cb();
-	}
-	var options = {
-	  url: link,
-	  headers: {
-	    'RegistrationToken': token,
-	  },
-	};
-	messageIndex++
-	request.get(options, function(error,response,body){
-		var parse;
-		if(!isJSON(body)){
-			return cb();
-		}
-		parse = JSON.parse(body);
-		Promise.map(parse.messages, function(msg){
-			return processMessage(msg)
-		})
-		.then(function(r){
-			for(i=0;i<r.length;i++){
-				if(r[i]){
-					database.addMessage(r[i].content, r[i].id, id, r[i].author, Date.parse(r[i].originalarrivaltime) || 0, 'skype')
-				}
+	},
+	getContacts: function(){
+		return new Promise(function(res,rej){
+			var options = {
+				url: 'https://contacts.skype.com/contacts/v1/users/'+username+'/contacts',
+				headers: {
+					'X-Skypetoken': skypeToken,
+				},
 			}
-			if(parse['_metadata'] && parse['_metadata'].backwardLink){
-				return getMessages(id, parse['_metadata'].backwardLink, cb)
-			}else{
-				return cb();
-			}
-		})
-	});
-}
-module.exports = function(data, localSequelize){
-	database = require(global.appRoot+'/database.js')(localSequelize);
-	return new Promise(function(res,rej){
-		login2Skype(data.username, data.password)
-		.then(function(r){
-			createEndpoint();
-			subscribe()
-			keepAlive()
-			setInterval(function(){
-				keepAlive()
-			}, 45000);
-			return getContacts()
-		})
-		.then(function(){
-			console.error("[SKYPE] Syncing with server. This might take a while.")
-			return new Promise(function(res,rej){
-				getConversations('https://bn2-client-s.gateway.messenger.live.com/v1/users/ME/conversations/?view=msnp24Equivalent&targetType=Passport%7CSkype%7CLync%7CThread&startTime=0', function(r){
-					res();		
+			request.get(options, function(error, response, body){
+				var json = JSON.parse(body).contacts;
+				Promise.map(json, function(item){
+					downloadProfilePicture(item.avatar_url, item.id);
+					return database.addContact(item['display_name'], item.id, 'skype')
+				})
+				.then(function(r){
+					return addOwnProfile();
+				})
+				.then(function(){
+					console.log("[Skype] Contacts completed.")
+					res();
+				})
+				.catch(function(e){
+					console.error(e);
 				})
 			})
 		})
-		.then(function(){
-			Promise.map(conversations, function(conversation){
-				getMessages(conversation.instance, conversation.link+'?startTime=0&view=msnp24Equivalent', function(r){
-					res();
-				});
-			})
-		})
-		.then(function(r){
-			poll();
-			setInterval(function(){
-				poll()
-			}, 500);
-			console.log("[Skype] Initialized. Returning control.")
-			res();
-		})
-	})
-	.catch(function(e){
-		throw e;
-	});
+	},
+
 }

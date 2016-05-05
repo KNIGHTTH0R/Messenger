@@ -19,20 +19,12 @@ global.mainWindow;
 function init(){
   sequelize.sync()
   .then(function() {
-    Promise.map(config.services, function(service){
-      return require(global.appRoot+'/modules/'+service.module+'.js')(service, sequelize)
-    })
-    .then(function(r){
-      global.mainWindow = new BrowserWindow({width: 1000, height: 800});
-      global.mainWindow.loadURL('file://' + __dirname + '/views/startup.html');
-      global.mainWindow.webContents.openDevTools();
-      global.mainWindow.on('closed', function() {
-        global.mainWindow = null;
-      });
-    })
-    .catch(function(e){
-      console.error(e);
-    })
+    global.mainWindow = new BrowserWindow({width: 1000, height: 800});
+    global.mainWindow.loadURL('file://' + __dirname + '/views/startup.html');
+    global.mainWindow.webContents.openDevTools();
+    global.mainWindow.on('closed', function() {
+      global.mainWindow = null;
+    });
   })
   .catch(function(e){
    console.error(e);

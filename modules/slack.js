@@ -34,7 +34,6 @@ function getContactFromUser(id){
 			return res(contactCache[id])
 		}
 		web.users.info(id, function(err, user){
-			console.log("[Slack] Fetched user "+user.user.name)
 			var send = {avatar: user.user.profile['image_original'], name: user.user['real_name'], id: user.user.id, username: user.user.name}
 			contactCache[user.user.id] = send;
 			res(send)
@@ -68,7 +67,6 @@ function getChannelMessages(conversation){
 						return database.addContact(r.name, message.user, r.avatar, 'slack')
 					})
 					.then(function(r){
-						console.log("[Slack] Adding message "+message.text)
 						return database.addMessage(message.text, message.ts, conversation, username, message.ts.split('.')[0], 'slack')
 					})
 					.then(function(r){

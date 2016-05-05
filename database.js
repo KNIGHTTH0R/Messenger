@@ -5,30 +5,28 @@ module.exports = function(sequelize){
 
 	var methods = {};
 	var Chat = sequelize.define('Chat', {
-	  name: Sequelize.STRING,
-	  instance: Sequelize.STRING,
-	  type: Sequelize.STRING,
-	  image: Sequelize.STRING,
-	  lastUpdated: Sequelize.STRING
+		name: Sequelize.STRING,
+		instance: Sequelize.STRING,
+		type: Sequelize.STRING,
+		lastUpdated: Sequelize.STRING,
+		lastMessageTS: Sequelize.STRING
 	})
 
 	var Contact = sequelize.define('Contact', {
-	  name: Sequelize.STRING,
-	  instance: Sequelize.STRING,
-	  type: Sequelize.STRING,
-	  image: Sequelize.STRING
+	  	name: Sequelize.STRING,
+	  	instance: Sequelize.STRING,
+	  	type: Sequelize.STRING,
 	})
 
-	var Message = sequelize.define('Message',
-		{
-		  content: Sequelize.STRING,
-		  instance: Sequelize.STRING,
-		  type: Sequelize.STRING,
-		  contact: Sequelize.STRING,
-		  lastUpdated: Sequelize.STRING
-		}
-	)
+	var Message = sequelize.define('Message', {
+		content: Sequelize.STRING,
+		instance: Sequelize.STRING,
+		type: Sequelize.STRING,
+		contact: Sequelize.STRING,
+		lastUpdated: Sequelize.STRING
+	})
 
+	sequelize.sync();
 	Chat.hasMany(Message, {as: 'messages'})
 
 	methods.models = {}
@@ -41,10 +39,8 @@ module.exports = function(sequelize){
 			Chat.findOne({where: {instance: id, type: type}})
 			.then(function(r){
 				if(!r){
-					console.log("[Database "+type+"] Adding chat "+name)
 					return Chat.create({name: name, instance: id, type: type, lastUpdated: lastUpdated, image: 'test'})
 				}else{
-					console.log("[Database "+type+"] Updating chat "+name)
 					r.name = name;
 					r.instance = id;
 					r.type = type;
@@ -54,7 +50,6 @@ module.exports = function(sequelize){
 				}
 			})
 			.then(function(r){
-				console.log("[Database "+type+"] Saved chat "+r.name);
 				res(r);
 			})
 			.catch(function(e){
@@ -64,7 +59,7 @@ module.exports = function(sequelize){
 	};
 
 	
-	methods.addMessage = function(content, instance, chatIdInstance, username, lastUpdated, type){
+	methods.addMessage = function(content, instance, chatIdInstance, username, lastUpdated, timestamp, type){
 		if(!content || !instance || !chatIdInstance || !username || !type){
 			return;
 		}
@@ -75,17 +70,18 @@ module.exports = function(sequelize){
 				if(!r){
 					throw "No Chat Found";
 				}else{
+					if(timestamp > r.lastMessageTS){
+						
+					}
 					chId = r.id;
 					return Message.findOne({where: {instance: instance, type: type}})
 				}
 			})
 			.then(function(r){
 				if(!r){
-					var send = {content: content, instance: instance, type: type, ChatId: chId, contact: username, lastUpdated: lastUpdated};
-					global.mainWindow.webContents.executeJavaScript('loadMessage('+chId+','+JSON.stringify(send)+')')
+					var send = {content: content, instance: instance, type: type, ChatId: chId, contact: username, lastUpdated: lastUpdated};			
 					return Message.create(send)
 				}else{
-					console.log("[Database "+type+"] Updating message from chatID "+chatIdInstance)
 					r.content = content;
 					r.instance = instance;
 					r.type = type;
@@ -96,7 +92,7 @@ module.exports = function(sequelize){
 				}
 			})
 			.then(function(r){
-				//console.log("[Database] Saved message. (Chat ID: "+chatIdInstance+")");
+				global.mainWindow.webContents.executeJavaScript('loadMessage('+chId+','+JSON.stringify(r)+')')
 				res()
 			})
 			.catch(function(e){
@@ -105,24 +101,22 @@ module.exports = function(sequelize){
 		})	
 	},
 
-	methods.addContact = function(name, instance, image, type){
+	methods.addContact = function(name, instance, type){
 		return new Promise(function(res,rej){
 			Contact.findOne({where: {instance: instance, type: type}})
 			.then(function(r){
 				if(!r){
 					//console.log("[Database "+type+"] Adding chat "+name)
-					return Contact.create({name: name, instance: instance, type: type, image: image})
+					return Contact.create({name: name, instance: instance, type: type})
 				}else{
 					//console.log("[Database "+type+"] Updating chat "+name)
 					r.name = name;
 					r.instance = instance;
 					r.type = type;
-					r.image = image;
 					return r.save()
 				}
 			})
 			.then(function(r){
-				console.log("[Database "+type+"] Saved contact "+r.name);
 				res(r);
 			})
 			.catch(function(e){

@@ -120,97 +120,106 @@
 	<script>
 		global.appRoot = __dirname+'/../';
 		var Promise = require('bluebird');
-		var Sequelize = require('sequelize');
+		var Sequelize = require('Sequelize');
 		var sequelize = new Sequelize({dialect: 'sqlite', storage: global.appRoot+'/db.sqlite', logging: false});
-		var database = require(global.appRoot+'/database.js')(sequelize);
-		var selectedChat;
+		var database = require(global.appRoot+'/database.js');
+		var config = require(global.appRoot+'/config.js');
+		var instances = [];
 
-		function loadMessage(chatId, content){
-			if(chatId !== selectedChat){
-				return;
-			}
-			sequelize.models.Contact.findOne({where: {instance: content.contact}})
-			.then(function(r){
-				if(!r){
-					r = {name: "?"}
-				}
-				var name = r.name || content.contact;
-				console.log(content);
-				document.getElementById('chatContent').innerHTML += '\
-					<div class="messageBox row">\
-						<div class="messageImg" style="background:url('+r.image+'); background-size:cover;">\
-							\
-						</div>\
-						<div class="messageContent">\
-							<p class="messageName">\
-								<b>'+name+'</b>\
-							</p>\
-							<p class="messageText">\
-								'+content.content+'\
-							</p>\
-						</div>\
+		function loadMessage(chatId, content, meta){
+			document.getElementById('chatContent').innerHTML += '\
+				<div class="messageBox row">\
+					<div class="messageImg" style="background:url(\''+global.appRoot+'/assets/'+meta.type+'/'+meta.username+'/'+content.author.instance+'.jpg\'); background-size:cover;">\
+						\
 					</div>\
-				';
-				var elem = document.getElementById('chatBody')
-				elem.scrollTop = elem.scrollHeight;
-			})
+					<div class="messageContent">\
+						<p class="messageName">\
+							<b>'+content.author.name+'</b>\
+						</p>\
+						<p class="messageText">\
+							'+content.content+'\
+						</p>\
+					</div>\
+				</div>\
+			';
+			var elem = document.getElementById('chatBody')
+			elem.scrollTop = elem.scrollHeight;
 		}
 
-		/*function grabContact(model){
-			return new Promise(function(res,rej){
-				sequelize.models.Contact.findById(model.contactId)
-				.then(function(r){
-					res(r.dataValues);
-				})
-			})
-		}*/
-
-		function loadChat(id){
+		function loadChat(instanceIndex, id){
 			selectedChat = id;
 			document.getElementById('chatContent').innerHTML = "";
-			sequelize.models.Message.findAll({where: {ChatId: id}, order: 'lastUpdated DESC', limit: 20})
+			instances[instanceIndex].getMessages(id)
 			.then(function(r){
 				r.reverse()
-				Promise.map(r, function(item){
-					loadMessage(id, item)
-				})
+				for(i=0;i<r.length;i++){
+					loadMessage(id, r[i], instances[instanceIndex])
+				}
 			})
 		}
 
-		
-		sequelize.models.Chat.findAll({order: 'lastUpdated DESC'})
-		.then(function(r){
-			for(i=0;i<r.length;i++){
-				var new_light_color = 'rgb('+(Math.floor((256-229)*Math.random())+230)+','+(Math.floor((256-229)*Math.random())+230)+','+(Math.floor((256-229)*Math.random())+230)+')';
-				var serviceColor;
-				var letter;
+		function loadConversationsWithInstance(instance){
+			instance.getConversations()
+			.then(function(r){
+				for(i=0;i<r.length;i++){
+					var serviceColor;
+					var letter;
+					if(!r[i]){
+						continue;
+					}
+					switch(r[i].module){
+						case 'skype':
+							serviceColor = '#16c1f0';
+							letter = 'S';
+						break;
+						case 'slack':
+							serviceColor = 'url(http://socialmediaweek.org/wp-content/blogs.dir/1/files/slack-pattern.jpg)';
+							letter = '#';
+						break;
+						default:
+						break;
+					}
+					if(!r[i].topic){
+						continue;
+					}
+					document.getElementById('populateSidebar').innerHTML += '\
+					<div class="chatBox row" onclick="loadChat(\''+instances.indexOf(instance)+'\',\''+r[i].id+'\')"> \
+						<div class="chatImg service two columns" style="background: '+serviceColor+'">\
+							'+letter+'\
+						</div> \
+						<p class="chatText ten columns">'+r[i].topic.toUpperCase()+'</p>\
+					</div>';
+				}
+			})
+		}
 
-				switch(r[i].type){
-					case 'skype':
-						serviceColor = '#16c1f0';
-						letter = 'S';
-					break;
-					case 'slack':
-						serviceColor = 'url(http://socialmediaweek.org/wp-content/blogs.dir/1/files/slack-pattern.jpg)';
-						letter = '#';
-					break;
-					default:
-					break;
-				}
-				if(!r[i].name){
-					continue;
-				}
-				document.getElementById('populateSidebar').innerHTML += '\
-				<div class="chatBox row" onclick="loadChat('+r[i].id+')"> \
-					<div class="chatImg service two columns" style="background: '+serviceColor+'">\
-						'+letter+'\
-					</div> \
-					<p class="chatText ten columns">'+r[i].name.toUpperCase()+'</p>\
-				</div>';
-			}
-		})
+		function loadContactsWithInstance(instance){
+			return new Promise(function(res,rej){
+				instance.getContacts()
+				.then(function(r){
+					res();
+				})
+			})
+
+		}
+		function loadContacts(instance){
+			loadContactsWithInstance(instance);
+		}
+
+
 		window.onload = function(){
-			loadChat(1);
+			for(i=0;i<config.services.length;i++){
+				var instance = config.services[i];
+				var codeInstance = require(global.appRoot+'modules/'+instance.module+'.js');
+				instances.push(codeInstance);
+				codeInstance.initialize(sequelize, instance)
+				.then(function(){
+					return loadContactsWithInstance(codeInstance)
+				})
+				.then(function(){
+					loadConversationsWithInstance(codeInstance)
+				})
+			}
 		}
 	</script>
 </head>
@@ -220,7 +229,7 @@
 			<div class="sbContainer">
 				<div class="logo">
 				</div>
-				<!--<h2 class="sidebarh2">MESSENGER</h2>-->
+				<h2 class="sidebarh2">MESSENGER</h2>
 			</div>
 		</div>
 		<div class="sidebarBody" id="populateSidebar">
